@@ -303,7 +303,11 @@ ifeq ($(THEOS_CURRENT_INSTANCE),)
 endif
 ```
 至此，common.mk及关联的系列makefile文件分析告一段落。  
-## tweak.mk文件分析  
+
+
+## tweak.mk系列文件分析  
++ 顶层tweak.mk文件  
+在样例Makefile中引入文件$(THEOS_MAKE_PATH)/tweak.mk:  
 ```make
 ifeq ($(THEOS_CURRENT_INSTANCE),)
 	include $(THEOS_MAKE_PATH)/master/tweak.mk
@@ -314,3 +318,83 @@ else
 endif
 ```
 完成common.mk系列makefile文件导入并未初始化变量THEOS_CURRENT_INSTANCE，所以首次引入该文件时，THEOS_CURRENT_INSTANCE值为空，因此首先导入$(THEOS_MAKE_PATH)/master/tweak.mk文件。  
++ master中的tweak.mk文件  
+以下为master/tweak.mk文件：  
+TWEAK_NAME初始定义于用户工程Makefile中，如样例makefile文件中；
+```make
+TWEAK_NAME := $(strip $(TWEAK_NAME))
+```
+引入rules.mk文件，  
+```make
+ifeq ($(_THEOS_RULES_LOADED),)
+include $(THEOS_MAKE_PATH)/rules.mk
+endif  
+```
+```make
+internal-all:: $(TWEAK_NAME:=.all.tweak.variables);
+internal-stage:: $(TWEAK_NAME:=.stage.tweak.variables);
+```
+<font color=ff4500>TWEAK_TARGET_PROCESS</font>由用户工程配置文件定义，在如下语句中添加到<font color=8a2be2>INSTALL_TARGET_PROCESSES</font>中，INSTALL_TARGET_PROCESSES变量在package.mk中被引用，在该deb安装完成后，变量指定值作为进程名执行killall命令。
+```make
+ifneq ($(TWEAK_TARGET_PROCESS),)
+INSTALL_TARGET_PROCESSES += $(TWEAK_TARGET_PROCESS)
+endif
+```
+包含子工程的Tweak项目变量生成：
+```make
+TWEAKS_WITH_SUBPROJECTS = $(strip $(foreach tweak,$(TWEAK_NAME),$(patsubst %,$(tweak),$(call __schema_var_all,$(tweak)_,SUBPROJECTS))))
+ifneq ($(TWEAKS_WITH_SUBPROJECTS),)
+internal-clean:: $(TWEAKS_WITH_SUBPROJECTS:=.clean.tweak.subprojects)
+endif
+```
+如当前样例工程为例，会检查<font color=ff4500>unlockscreen_SUBPROJECTS</font>变量，如果该变量有定义，则unlockscreen会被包含在变量TWEAKS_WITH_SUBPROJECTS中。  
+
+	当前tweak目标编译命令，重新以顶层makefiie启动make：
+```make
+$(TWEAK_NAME):
+	@$(MAKE) -f $(_THEOS_PROJECT_MAKEFILE_NAME) --no-print-directory --no-keep-going $@.all.tweak.variables
+$(eval $(call __mod,master/tweak.mk))
+```
+当前样例工程中，编译目标是：<font color=8a2be2>unlockscreen.tweak.variables</font>，根据该目标可在master/rules.mk文件中找到对应规则。
+
+## rules.mk系列文件分析  
++ 顶层rules.mk文件  
+在master/tweak.mk中引入顶层$(THEOS_MAKE_PATH)/rules.mk文件
+```make
+ifeq ($(THEOS_CURRENT_INSTANCE),)
+	include $(THEOS_MAKE_PATH)/master/rules.mk
+else
+	include $(THEOS_MAKE_PATH)/instance/rules.mk
+endif
+```  
+顶层rules.mk文件中，当前THEOS_CURRENT_INSTANCE未定义，首先引入master/rules.mk文件。  
+完成master/rules.mk文件引入后，定义文件logos相关的文件处理规则:  
+```make
+%.mm: %.l.mm
+	$(THEOS_BIN_PATH)/logos.pl $< > $@
+%.mm: %.xmm
+	$(THEOS_BIN_PATH)/logos.pl $< > $@
+%.mm: %.xm
+	$(THEOS_BIN_PATH)/logos.pl $< > $@
+%.m: %.xm
+	$(THEOS_BIN_PATH)/logos.pl $< > $@
+%.swift: %.xswift
+	$(THEOS_BIN_PATH)/logos.pl $< > $@
+```
+以及编译环境相关的目录创建规则：  
+```make
+$(THEOS_OBJ_DIR):
+	@cd $(THEOS_BUILD_DIR); mkdir -p $(THEOS_OBJ_DIR_NAME)
+$(THEOS_OBJ_DIR)/.stamp: $(THEOS_OBJ_DIR)
+	@mkdir -p $(dir $@); touch $@
+$(THEOS_OBJ_DIR)/%/.stamp: $(THEOS_OBJ_DIR)
+	@mkdir -p $(dir $@); touch $@
+	ifneq ($(THEOS_PACKAGE_DIR_NAME),)
+$(THEOS_PACKAGE_DIR):
+	@cd $(THEOS_BUILD_DIR); mkdir -p $(THEOS_PACKAGE_DIR_NAME)
+endif
+```
++ master中的rules.mk文件  
+该文件为编译过程中的主要文件之一，详见master_rules.md文件中的分析。  
++ instance中的rules.mk文件  
+该文件为编译过程最重要文件，详见instance_rules.md文件分析。

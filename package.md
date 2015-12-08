@@ -110,3 +110,67 @@ __BASEVER_FOR_BUILDNUM = $(or $(__USERVER_FOR_BUILDNUM),$(THEOS_PACKAGE_BASE_VER
 #package.mk
 install:: before-install internal-install after-install
 ```
+安装包检查：
+```make
+internal-install-check::
+	@if [ -z "$(_THEOS_PACKAGE_LAST_FILENAME)" ]; then \
+		$(PRINT_FORMAT_ERROR) "$(MAKE) install and show require that you build a package before you try to install it." >&2; \
+		exit 1; \
+	fi
+	@if [ ! -f "$(_THEOS_PACKAGE_LAST_FILENAME)" ]; then \
+		$(PRINT_FORMAT_ERROR) "Could not find \"$(_THEOS_PACKAGE_LAST_FILENAME)\" to install. Aborting." >&2; \
+		exit 1; \
+	fi
+```
+安装环境变量
+```make
+export TARGET_INSTALL_REMOTE
+_THEOS_INSTALL_TYPE := local
+ifeq ($(TARGET_INSTALL_REMOTE),$(_THEOS_TRUE))
+_THEOS_INSTALL_TYPE := remote
+#略去无关语句
+THEOS_DEVICE_PORT ?= 22
+THEOS_DEVICE_USER ?= root
+export THEOS_DEVICE_IP THEOS_DEVICE_PORT THEOS_DEVICE_USER
+endif
+```
+以上，<font color=ff4500>THEOS_DEVICE_IP</font>必须在用户工程配置Makefile中定义，另外的用户名<font color=ff4500>THEOS_DEVICE_USER</font>和设备端口<font color=ff4500>THEOS_DEVICE_PORT</font>如果没有定义，则默认为root和22端口。    
+
+  安装过程  
+```make
+install:: before-install internal-install after-install
+after-install:: internal-after-install
+before-install::
+ifneq ($(PREINSTALL_TARGET_PROCESSES),)
+	$(ECHO_PRE_UNLOADING)install.exec "killall $(PREINSTALL_TARGET_PROCESSES) 2>/dev/null || true"$(ECHO_END)
+else
+	@:
+endif
+internal-install::
+	@:
+internal-after-install::
+ifneq ($(INSTALL_TARGET_PROCESSES),)
+	$(ECHO_UNLOADING)install.exec "killall $(INSTALL_TARGET_PROCESSES) 2>/dev/null || true"$(ECHO_END)
+else
+	@:
+endif
+```  
+引入另一个mk文件deb_remote.mk
+```make
+-include $(THEOS_MAKE_PATH)/install/$(_THEOS_PACKAGE_FORMAT)_$(_THEOS_INSTALL_TYPE).mk
+```
+deb_remote.mk文件中定义执行安装的具体命令：
+```make
+internal-install:: internal-install-check
+	$(ECHO_INSTALLING)true$(ECHO_END)
+	$(ECHO_NOTHING)install.exec "cat > /tmp/_theos_install.deb; $(_THEOS_SUDO_COMMAND) dpkg -i /tmp/_theos_install.deb && rm /tmp/_theos_install.deb" < "$(_THEOS_PACKAGE_LAST_FILENAME)"$(ECHO_END)
+```  
+install.exec是个shell脚本，里面命令简短如下：
+```make
+if [[ TARGET_INSTALL_REMOTE -eq 1 ]]; then
+	exec ssh -p $THEOS_DEVICE_PORT $THEOS_DEVICE_USER@$THEOS_DEVICE_IP "$@"
+else
+	exec sh -c "$@"
+fi
+```
+即远程连接后执行命令，该脚本可以改进增加密码交互能力。
